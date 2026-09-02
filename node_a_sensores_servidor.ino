@@ -1,0 +1,451 @@
+/*
+  ==========================================================
+  NODE A - SERVIDOR WEBSOCKET (VERSAO COMPLETA - SENSORES + AUDIO)
+  ==========================================================
+  Wemos D1 Mini (ESP8266)
+
+  Funcao:
+   - Cria uma rede WiFi propria (modo Access Point)
+   - Le sensor de temperatura (termopar tipo K via modulo MAX6675) e
+     sensor de pressao (PS10, saida analogica 1-5V, 0-10bar), enviando
+     os dados via WebSocket para o Node B a cada 2s
+   - Recebe evento vindo do Node B (som1, som2, som3, ...) e toca
+     o audio correspondente no modulo DFPlayer Mini + mini
+     alto-falante
+   - Ao um cliente (Node B) se conectar, informa automaticamente
+     quantos audios existem no cartao SD. Essa quantidade e lida
+     do cartao NA PRIMEIRA CONEXAO recebida (nao no boot) - assim,
+     mesmo se o cartao SD ainda nao estiver pronto logo ao ligar
+     (boot "frio"), a leitura so acontece quando o Node B ja
+     estiver conectando, dando mais tempo do cartao inicializar.
+     O resultado fica em cache: reconexoes seguintes reaproveitam
+     a mesma contagem, sem reler a SD toda hora. Durante as
+     tentativas de leitura, o Node B recebe mensagens de progresso
+     ("tentativa") para mostrar na tela.
+
+  Bibliotecas necessarias (Gerenciador de Bibliotecas do Arduino IDE):
+   - ESP8266WiFi            (ja vem com o core do ESP8266)
+   - WebSockets             (autor: Markus Sattler / Links2004)
+   - ArduinoJson             (autor: Benoit Blanchon)
+   - MAX6675                 (autor: Adafruit - busque "MAX6675" no
+     Gerenciador de Bibliotecas)
+   - SoftwareSerial          (ja vem com o core do ESP8266)
+   - DFRobotDFPlayerMini     (autor: DFRobot)
+  (O sensor PS10 nao precisa de biblioteca - e lido direto pelo ADC)
+
+  IMPORTANTE: instale o suporte a placas ESP8266 no Arduino IDE
+  (Preferencias > URLs Adicionais para Gerenciadores de Placas:
+  http://arduino.esp8266.com/stable/package_esp8266com_index.json).
+  Selecione a placa que fez o upload funcionar no seu caso (ex:
+  "LOLIN(WEMOS) D1 R1"). O codigo usa NUMEROS DE GPIO diretamente
+  (ex: 5 em vez de D1), o que elimina qualquer ambiguidade entre
+  placas diferentes - a ligacao fisica sempre sera a mesma.
+
+  Ligacoes (numero de GPIO real -> rotulo correspondente no
+  Wemos D1 Mini, caso queira conferir pela serigrafia da placa):
+   - MAX6675 SCK  -> GPIO0  (rotulo D3)
+   - MAX6675 CS   -> GPIO2  (rotulo D4)
+   - MAX6675 SO   -> GPIO14 (rotulo D5)
+   - MAX6675 VCC  -> 3V3, GND -> GND
+   - PS10 fio vermelho (VCC)  -> 5V (fonte externa ou pino 5V do Wemos)
+   - PS10 fio preto (GND)     -> GND (comum com o Wemos)
+   - PS10 fio verde (sinal, 1-5V) -> DIVISOR DE TENSAO -> pino A0 do Wemos
+     ATENCAO - OBRIGATORIO usar um divisor de tensao entre o sinal do
+     PS10 e o pino A0! O sinal do sensor chega a 5V, mas o A0 do Wemos
+     D1 Mini so aceita ate ~3.2V - ligar direto DANIFICA a entrada
+     analogica do ESP8266.
+     Circuito do divisor (2 resistores em serie entre o sinal e o GND,
+     com o pino A0 ligado no meio dos dois):
+       Sinal do PS10 --[R1 = 10k]-- (no A0) --[R2 = 15k]-- GND
+     Essa proporcao (10k/15k) reduz o sinal de 5V para 3.0V no A0,
+     com boa margem de seguranca.
+   - DFPlayer Mini RX -> GPIO4 (rotulo D2) do Wemos (recomendado resistor 1k em serie)
+   - DFPlayer Mini TX -> GPIO5 (rotulo D1) do Wemos
+   - DFPlayer Mini VCC -> 5V, GND -> GND (GND comum com o Wemos)
+   - Mini alto-falante -> saida SPK_1/SPK_2 do DFPlayer Mini
+
+  OBS: o ESP8266 so tem uma UART de hardware, ja usada pelo Serial
+  (debug/gravacao), por isso o DFPlayer e ligado via SoftwareSerial.
+
+  IMPORTANTE - Calibracao do PS10:
+  A conversao ADC -> tensao no pino A0 do Wemos D1 Mini varia um pouco
+  de placa para placa (o valor TENSAO_REF_PLACA abaixo e uma estimativa
+  tipica). Para calibrar com precisao:
+   1) Meca com um multimetro a tensao real no fio verde do PS10 (sinal)
+      em repouso (pressao atmosferica/zero) - deve estar proximo de 1V.
+   2) Compare com o valor impresso no Serial Monitor (que mostra a
+      tensao calculada pelo codigo).
+   3) Se houver diferenca, ajuste a constante TENSAO_REF_PLACA
+      proporcionalmente ate os valores baterem.
+
+  TARA AUTOMATICA DO ZERO: alem da calibracao acima (que ajusta a
+  PRECISAO da leitura), o codigo tambem faz uma TARA automatica no
+  boot (funcao calibrarZeroPressao()): ele mede a pressao "crua" logo
+  ao ligar, assumindo que nesse momento nao ha nada injetado no
+  sensor (so a pressao atmosferica local), e usa esse valor como
+  referencia de 0 bar - descontando esse offset de todas as leituras
+  seguintes. Isso faz o mostrador sempre comecar do 0 bar em repouso,
+  independente da altitude/pressao atmosferica de onde o Node A for
+  ligado. IMPORTANTE: nao ligue o Node A com pressao ja injetada no
+  sensor, ou a tara vai calibrar errado (vai considerar aquele
+  momento como "zero").
+
+  IMPORTANTE - Cartao microSD do DFPlayer Mini:
+   - Formate o cartao em FAT32.
+   - Crie uma pasta chamada "01" (dois digitos) na raiz do cartao
+     - NAO use "mp3"; a pasta numerada e necessaria para o DFPlayer
+       conseguir informar a quantidade de arquivos.
+   - Coloque os arquivos de audio dentro dela, nomeados
+     EXATAMENTE como: 001.mp3, 002.mp3, 003.mp3, 004.mp3, ...
+     (tres digitos, sequenciais, sem pular numeros)
+   - som1 -> 001.mp3 | som2 -> 002.mp3 | som3 -> 003.mp3 | etc.
+   - Basta adicionar/remover arquivos na pasta "01" e reiniciar o
+     Node A - a quantidade e detectada na primeira conexao do Node B
+     apos o boot e fica em cache, sem precisar editar o codigo.
+  ==========================================================
+*/
+
+#include <ESP8266WiFi.h>
+#include <WebSocketsServer.h>
+#include <ArduinoJson.h>
+#include <max6675.h>
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+
+// ---------- Configuracao da rede WiFi (Node A cria a rede) ----------
+const char* AP_SSID = "ESP32_Sensores"; // nome mantido para nao precisar mudar o Node B
+const char* AP_PASS = "12345678";       // minimo 8 caracteres
+
+// ---------- Quantidade de audios na pasta "01" do cartao SD ----------
+// Detectada automaticamente na primeira conexao do Node B (nao no
+// boot) - nao precisa editar aqui, e o valor fica em cache.
+int numAudios = 0;
+
+// ---------- Pinos (GPIO diretos - evita ambiguidade entre variantes de placa) ----------
+// Rotulos correspondentes na serigrafia do Wemos D1 Mini: D3, D4, D5, D2, D1
+#define PINO_MAX6675_SCK  0    // D3 no Wemos D1 Mini
+#define PINO_MAX6675_CS   2    // D4 no Wemos D1 Mini
+#define PINO_MAX6675_SO   14   // D5 no Wemos D1 Mini
+#define PINO_PRESSAO_ADC  A0   // unica entrada analogica do Wemos D1 Mini
+#define PINO_DFPLAYER_RX  5    // D1 no Wemos D1 Mini - recebe do TX do DFPlayer
+#define PINO_DFPLAYER_TX  4    // D2 no Wemos D1 Mini - envia para o RX do DFPlayer
+
+// ---------- Objetos ----------
+WebSocketsServer webSocket(81);
+MAX6675 termopar(PINO_MAX6675_SCK, PINO_MAX6675_CS, PINO_MAX6675_SO);
+SoftwareSerial serialDFPlayer(PINO_DFPLAYER_RX, PINO_DFPLAYER_TX); // RX, TX
+DFRobotDFPlayerMini dfPlayer;
+
+float ultimaTemperaturaValida = 0;
+
+// Temperatura suavizada por filtro de media movel exponencial (EMA) -
+// reduz o ruido natural do MAX6675 (leitura pode oscilar +-1C entre
+// amostras por ruido eletrico), evitando que o valor exibido fique
+// "pulando" entre graus vizinhos sem uma mudanca real de temperatura.
+float temperaturaFiltrada = NAN; // NAN = ainda sem leitura, inicializa na primeira
+
+// Fator de suavizacao do filtro (0 a 1): quanto MENOR, mais suave
+// (mais resistente a ruido, porem mais lento pra acompanhar mudancas
+// reais de temperatura). Quanto MAIOR, mais responsivo, porem mais
+// sujeito a ruido. 0.15 da uma boa estabilidade sem ficar lento
+// demais para mudancas reais.
+const float FATOR_FILTRO_TEMPERATURA = 0.15;
+
+// Offset de tara do sensor de pressao - calculado automaticamente no
+// boot (assume que nesse momento nao ha pressao injetada, so a
+// pressao atmosferica local). Esse valor e subtraido de toda leitura
+// seguinte, entao a leitura "em repouso" sempre marca 0 bar,
+// independente da altitude/pressao atmosferica do local.
+float offsetPressaoBar = 0.0;
+
+// ---------- Constantes de conversao do sensor de pressao PS10 ----------
+// Tensao aproximada (em Volts) correspondente ao valor maximo do ADC
+// (1023) no pino A0 do Wemos D1 Mini. Pode variar por placa - calibrar
+// se necessario (ver instrucoes no cabecalho do arquivo).
+const float TENSAO_REF_PLACA = 3.2;
+
+// Proporcao do divisor de tensao externo (R1=10k, R2=15k):
+// FATOR = (R1+R2)/R2 = 25/15 - usado para "desfazer" o divisor e
+// recuperar a tensao real do sinal do PS10 a partir da tensao lida no A0.
+const float FATOR_DIVISOR_EXTERNO = 25.0 / 15.0;
+
+// Faixa de saida do PS10: 1V = 0 bar, 5V = 10 bar (sensor 0-10bar)
+const float TENSAO_SENSOR_MIN = 1.0;
+const float TENSAO_SENSOR_MAX = 5.0;
+const float PRESSAO_MIN_BAR   = 0.0;
+const float PRESSAO_MAX_BAR   = 10.0;
+
+// ---------- Controle de envio periodico dos sensores ----------
+unsigned long ultimoEnvio = 0;
+// 500ms ainda parece quase instantaneo no mostrador (principalmente
+// com o filtro de temperatura ja suavizando as leituras), mas gera
+// bem menos trafego/carga no Node A que 300ms - isso da mais folga
+// para o Node A processar os eventos de audio (som1/som2/...)
+// prontamente, sem competir tanto com o envio continuo dos sensores.
+const unsigned long INTERVALO_ENVIO = 500;
+
+// ==========================================================
+// Toca o arquivo NNN.mp3 dentro da pasta "01" do cartao SD.
+// numero=1 -> 001.mp3 | numero=2 -> 002.mp3 | numero=3 -> 003.mp3
+void tocarAudio(int numero) {
+  dfPlayer.playFolder(1, numero); // pasta "01", faixa "numero"
+  Serial.printf("[DFPLAYER] Tocando som%d.\n", numero);
+}
+
+// ==========================================================
+float lerTemperatura() {
+  float leitura = termopar.readCelsius();
+  if (isnan(leitura)) {
+    // NAN = termopar desconectado ou erro de leitura (MAX6675 requer
+    // pelo menos 250ms entre leituras, ja garantido pelo INTERVALO_ENVIO)
+    Serial.println("AVISO: falha na leitura do MAX6675 (termopar desconectado?). Mantendo ultima leitura.");
+    return ultimaTemperaturaValida;
+  }
+  ultimaTemperaturaValida = leitura;
+
+  // Aplica o filtro de media movel exponencial para suavizar o ruido
+  if (isnan(temperaturaFiltrada)) {
+    temperaturaFiltrada = leitura; // primeira leitura valida, inicializa direto
+  } else {
+    temperaturaFiltrada += FATOR_FILTRO_TEMPERATURA * (leitura - temperaturaFiltrada);
+  }
+
+  return temperaturaFiltrada;
+}
+
+// Le o sensor de pressao PS10 (analogico) e converte para bar.
+// Retorna o valor "cru", sem descontar a tara (offset de calibracao).
+float lerPressaoBruta() {
+  // Faz a media de varias leituras para reduzir ruido do sinal analogico
+  const int NUM_AMOSTRAS = 10;
+  long soma = 0;
+  for (int i = 0; i < NUM_AMOSTRAS; i++) {
+    soma += analogRead(PINO_PRESSAO_ADC);
+    delay(2);
+  }
+  float leituraADC = soma / (float)NUM_AMOSTRAS;
+
+  float tensaoNoA0 = (leituraADC / 1023.0) * TENSAO_REF_PLACA;
+  float tensaoSensor = tensaoNoA0 * FATOR_DIVISOR_EXTERNO;
+
+  float pressaoBar = (tensaoSensor - TENSAO_SENSOR_MIN) /
+                      (TENSAO_SENSOR_MAX - TENSAO_SENSOR_MIN) *
+                      (PRESSAO_MAX_BAR - PRESSAO_MIN_BAR);
+
+  return pressaoBar;
+}
+
+// Retorna a pressao com a tara aplicada (offsetPressaoBar
+// descontado) - passo intermediario antes do ajuste fino de ganho.
+float lerPressao() {
+  return lerPressaoBruta() - offsetPressaoBar;
+}
+
+// ---------- Ajuste fino de ganho/offset residual ----------
+// Depois da tara (zero), ainda pode sobrar um pequeno erro de GANHO
+// (a leitura "abre" mais ou menos que o real conforme a pressao
+// aumenta) - isso e diferente do offset de zero, que a tara ja
+// corrige. Calculado empiricamente com 2 pontos de teste reais:
+//   - Em repouso (pressao real = 0 bar): estava mostrando -0.1 bar
+//   - Injetando 1.2 bar reais: estava mostrando 1.4 bar
+// Resolvendo a reta "medido = GANHO * real + OFFSET" com esses 2
+// pontos: GANHO ≈ 1.25 e OFFSET ≈ -0.1. A correcao abaixo inverte
+// essa reta para recuperar o valor real a partir do medido.
+//
+// Para recalibrar no futuro com novos pontos de teste (P1_real,
+// P1_medido) e (P2_real, P2_medido):
+//   GANHO_RESIDUAL  = (P2_medido - P1_medido) / (P2_real - P1_real)
+//   OFFSET_RESIDUAL = P1_medido - GANHO_RESIDUAL * P1_real
+const float GANHO_RESIDUAL_PRESSAO  = 1.25;
+const float OFFSET_RESIDUAL_PRESSAO = -0.1;
+
+// Retorna a pressao final, com tara + ajuste fino de ganho aplicados.
+// Esta e a funcao que deve ser usada no restante do codigo. O valor
+// pode ser negativo (ex: vacuo/depressao), o que e esperado e normal
+// - o gauge no Node B ja limita visualmente o ponteiro na escala
+// configurada (-0.5 a 2 bar).
+float lerPressaoCorrigida() {
+  float pressaoTarada = lerPressao();
+  return (pressaoTarada - OFFSET_RESIDUAL_PRESSAO) / GANHO_RESIDUAL_PRESSAO;
+}
+
+// Calibra o zero do sensor de pressao (tara). Deve ser chamada uma
+// vez no boot, assumindo que nesse momento nao ha pressao injetada
+// no sensor - so a pressao atmosferica do local. Faz varias leituras
+// e usa a media, para reduzir o efeito de ruido pontual na calibracao.
+void calibrarZeroPressao() {
+  Serial.println("Calibrando zero do sensor de pressao (PS10)...");
+  const int AMOSTRAS_CALIBRAGEM = 20;
+  float soma = 0;
+  for (int i = 0; i < AMOSTRAS_CALIBRAGEM; i++) {
+    soma += lerPressaoBruta();
+    delay(50);
+  }
+  offsetPressaoBar = soma / AMOSTRAS_CALIBRAGEM;
+  Serial.printf("Offset de pressao calibrado: %.3f bar (sera descontado de todas as leituras)\n", offsetPressaoBar);
+}
+
+void enviarDadosSensores() {
+  float temperatura = lerTemperatura();
+  float pressao = lerPressaoCorrigida();
+
+  JsonDocument doc;
+  doc["temp"]  = temperatura;
+  doc["press"] = pressao;
+
+  String saida;
+  serializeJson(doc, saida);
+
+  webSocket.broadcastTXT(saida);
+  Serial.println("[WS] Enviado: " + saida);
+}
+
+// Informa a um cliente especifico quantos audios estao disponiveis.
+// Chamado sempre que um novo cliente (Node B) se conecta.
+void enviarQuantidadeAudios(uint8_t num) {
+  JsonDocument doc;
+  doc["num_audios"] = numAudios;
+
+  String saida;
+  serializeJson(doc, saida);
+
+  webSocket.sendTXT(num, saida);
+  Serial.println("[WS] Enviado num_audios: " + saida);
+}
+
+// Le a quantidade de audios na pasta "01" do cartao SD, com
+// retentativas (o cartao pode nao estar pronto logo apos ligar).
+// So executa a busca completa se ainda nao tiver uma contagem
+// valida - reconexoes seguintes reaproveitam o valor em cache.
+void lerQuantidadeAudios(uint8_t num) {
+
+    if (numAudios > 0) {
+      Serial.println("Quantidade de audios ja conhecida, pulando releitura.");
+      return;
+    }
+
+    delay(200); // pequena pausa antes de consultar o cartao
+
+    // Tenta ler a quantidade de audios varias vezes. Logo apos ligar
+    // a alimentacao (boot "frio"), o cartao SD as vezes ainda nao esta
+    // totalmente pronto na primeira consulta e a leitura falha
+    // (retorna -1) - mas funciona normalmente alguns instantes depois.
+    // No reset (boot "quente"), a alimentacao ja estava estavel ha
+    // mais tempo, entao costuma funcionar de primeira.
+    const int MAX_TENTATIVAS_LEITURA_SD = 15;
+    for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_LEITURA_SD; tentativa++) {
+      numAudios = dfPlayer.readFileCountsInFolder(1); // conta arquivos na pasta "01"
+      if (numAudios > 0) {
+        Serial.printf("Audios encontrados na pasta 01: %d (tentativa %d)\n", numAudios, tentativa);
+        break;
+      }
+      Serial.printf("Tentativa %d: leitura da pasta 01 falhou (retornou %d). Tentando novamente...\n", tentativa, numAudios);
+
+      JsonDocument doc;
+      doc["tentativa"] = tentativa;
+      String saida;
+      serializeJson(doc, saida);
+      webSocket.sendTXT(num, saida);
+
+      delay(500);
+    }
+
+    if (numAudios <= 0) {
+      Serial.println("ERRO: nao foi possivel ler a quantidade de audios na pasta 01 apos varias tentativas!");
+      numAudios = 0; // evita enviar valor negativo ao Node B
+
+      JsonDocument doc;
+      doc["erro"] = "Falha ao ler audios na SD";
+      String saida;
+      serializeJson(doc, saida);
+      webSocket.sendTXT(num, saida);
+    }
+}
+
+// ==========================================================
+void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.printf("[WS] Cliente %u conectado\n", num);
+      lerQuantidadeAudios(num);
+      enviarQuantidadeAudios(num);
+      break;
+
+    case WStype_DISCONNECTED:
+      Serial.printf("[WS] Cliente %u desconectado\n", num);
+      break;
+
+    case WStype_TEXT: {
+      String msg = String((char*)payload);
+      Serial.printf("[WS] Mensagem recebida: %s\n", msg.c_str());
+
+      JsonDocument doc;
+      DeserializationError err = deserializeJson(doc, msg);
+      if (!err) {
+        const char* evento = doc["event"];
+        if (evento != nullptr) {
+          String ev = String(evento);
+          if (ev.startsWith("som")) {
+            int numero = ev.substring(3).toInt(); // "som5" -> 5
+            if (numero >= 1 && numero <= numAudios) {
+              tocarAudio(numero);
+            } else {
+              Serial.printf("[WS] Numero de audio invalido: %d (max: %d)\n", numero, numAudios);
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
+// ==========================================================
+void setup() {
+  Serial.begin(115200);
+
+  // Sensor de temperatura (MAX6675 nao precisa de begin() - so um
+  // pequeno tempo de estabilizacao apos ligar, recomendado pelo fabricante)
+  delay(500);
+  Serial.println("MAX6675 pronto.");
+
+  // Sensor de pressao PS10 (analogico via A0) - nao precisa de
+  // inicializacao, so o pino A0 ja disponivel para leitura.
+  Serial.println("Sensor de pressao PS10 pronto (leitura via A0).");
+  calibrarZeroPressao(); // tara automatica - assume sem pressao injetada agora
+
+  // DFPlayer Mini (via SoftwareSerial)
+  serialDFPlayer.begin(9600);
+  delay(1000); // da tempo do cartao SD ficar pronto antes de inicializar
+  if (!dfPlayer.begin(serialDFPlayer, false, true)) {
+    // false = nao espera confirmacao (ACK); true = reseta o modulo ao iniciar
+    // Alguns clones do DFPlayer sao instaveis para responder o ACK a tempo;
+    // desativar essa espera evita falso "nao encontrado" mesmo com tudo certo.
+    Serial.println("ERRO: DFPlayer Mini nao encontrado! Verifique fiacao/cartao SD.");
+  } else {
+    dfPlayer.volume(20); // volume de 0 a 30
+    Serial.println("DFPlayer Mini pronto.");
+  }
+
+  // Cria a rede WiFi (Access Point)
+  WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.print("Access Point criado. IP: ");
+  Serial.println(WiFi.softAPIP()); // normalmente 192.168.4.1
+
+  // Inicia o servidor WebSocket
+  webSocket.begin();
+  webSocket.onEvent(onWebSocketEvent);
+}
+
+// ==========================================================
+void loop() {
+  webSocket.loop();
+
+  if (millis() - ultimoEnvio >= INTERVALO_ENVIO) {
+    ultimoEnvio = millis();
+    enviarDadosSensores();
+  }
+}
