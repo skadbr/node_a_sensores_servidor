@@ -1,6 +1,6 @@
 /*
   ==========================================================
-  NODE A - SERVIDOR OTIMIZADO PARA MÚLTIPLOS CLIENTES
+  NODE A - OPÇÃO 2: MANÔMETRO DE -0.5 A 2.0 BAR (SEMICÍRCULO SUPERIOR)
   ==========================================================
 */
 
@@ -169,8 +169,12 @@ const char HTML_WEB_PAGE[] PROGMEM = R"rawliteral(
       if (dadosRecebidos) {
         document.getElementById("txtTemp").innerText = Math.round(temperaturaAtual);
         document.getElementById("txtBar").innerText = pressaoAtual.toFixed(1);
-        desenharGauge("gaugeTemp", temperaturaAtual, -30, 180, 330, 180);
-        desenharGauge("gaugePressure", pressaoAtual, -0.5, 2.0, 315, 180);
+
+        // Temperatura: -30°C (180° - Esquerda) até 180°C (360° - Direita)
+        desenharGauge("gaugeTemp", temperaturaAtual, -30, 180, 180, 360);
+        
+        // Pressão: -0.5 bar (180° - Esquerda) até 2.0 bar (360° - Direita)
+        desenharGauge("gaugePressure", pressaoAtual, -0.5, 2.0, 180, 360);
       }
     }
 
@@ -186,22 +190,50 @@ const char HTML_WEB_PAGE[] PROGMEM = R"rawliteral(
     }
 
     function calcularAnguloGauge(val, vMin, vMax, aIni, aFin) {
-      if (val < vMin) val = vMin; if (val > vMax) val = vMax;
-      let prop = (val - vMin) / (vMax - vMin), sweep = aFin - aIni;
-      if (sweep <= 0) sweep += 360;
-      return (aIni + prop * sweep) % 360;
+      if (val < vMin) val = vMin;
+      if (val > vMax) val = vMax;
+      let prop = (val - vMin) / (vMax - vMin);
+      let sweep = aFin - aIni;
+      return aIni + prop * sweep;
     }
 
     function desenharGauge(id, val, vMin, vMax, aIni, aFin) {
       const cv = document.getElementById(id); if (!cv) return;
       const ctx = cv.getContext("2d"), cx = cv.width / 2, cy = cv.height / 2, r = 45;
       ctx.clearRect(0, 0, cv.width, cv.height);
-      ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, 2 * Math.PI); ctx.fillStyle = "#1a1a1a"; ctx.fill();
-      ctx.strokeStyle = "#444"; ctx.lineWidth = 2; ctx.stroke();
+
+      // Desenha fundo circular escuro
+      ctx.beginPath(); 
+      ctx.arc(cx, cy, r + 5, 0, 2 * Math.PI); 
+      ctx.fillStyle = "#1a1a1a"; 
+      ctx.fill();
+      ctx.strokeStyle = "#444"; 
+      ctx.lineWidth = 2; 
+      ctx.stroke();
+
+      // Desenha o arco superior do manômetro (180° a 360°)
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 5, Math.PI, 2 * Math.PI);
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      // Calcula o ângulo em radianos para a posição do ponteiro
       let angRad = (calcularAnguloGauge(val, vMin, vMax, aIni, aFin) * Math.PI) / 180;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r * Math.cos(angRad), cy + r * Math.sin(angRad));
-      ctx.strokeStyle = "#ff3d00"; ctx.lineWidth = 3; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 2 * Math.PI); ctx.fillStyle = "#fff"; ctx.fill();
+
+      // Desenha a agulha do ponteiro
+      ctx.beginPath(); 
+      ctx.moveTo(cx, cy); 
+      ctx.lineTo(cx + r * Math.cos(angRad), cy + r * Math.sin(angRad));
+      ctx.strokeStyle = "#ff3d00"; 
+      ctx.lineWidth = 3; 
+      ctx.stroke();
+
+      // Centro do mostrador
+      ctx.beginPath(); 
+      ctx.arc(cx, cy, 4, 0, 2 * Math.PI); 
+      ctx.fillStyle = "#fff"; 
+      ctx.fill();
     }
 
     setInterval(() => { if (mensagemStatus !== "" && (Date.now() - statusTimestamp) >= STATUS_DURACAO) { mensagemStatus = ""; atualizarNomeSom(); } }, 300);
@@ -350,8 +382,6 @@ void setup() {
 
   WiFi.softAP(AP_SSID, AP_PASS);
 
-  // OTIMIZAÇÃO: Servidor HTTP usa envio P_PROGMEM para economizar RAM 
-  // e adiciona os cabeçalhos de controle de conexao
   server.on("/", []() {
     server.sendHeader("Connection", "close");
     server.send_P(200, "text/html", HTML_WEB_PAGE);
