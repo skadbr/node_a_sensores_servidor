@@ -487,7 +487,9 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   svg.gauge-svg { width: 100%; height: auto; }
   .gauge-arc { fill: none; stroke: #16405c; stroke-width: 8; }
   .gauge-arc-glow { fill: none; stroke: #0af0ff; stroke-width: 2; opacity: 0.5; }
-  .gauge-needle { stroke: #ffe14d; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 4px #ffcc00); transition: transform 0.25s ease-out; transform-origin: 100px 95px; }
+  .gauge-band-amarela { fill: none; stroke: #ffcc00; stroke-width: 8; }
+  .gauge-band-vermelha { fill: none; stroke: #ff3030; stroke-width: 8; }
+  .gauge-needle { stroke: #ffe14d; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 4px #ffcc00); transition: transform 0.25s ease-out; }
   .gauge-pivot { fill: #ffe14d; }
   .gauge-tick { stroke: #2c6a8f; stroke-width: 1.5; }
   .gauge-ticklabel { fill: #5fa8c9; font-size: 9px; text-anchor: middle; }
@@ -570,9 +572,11 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
 
   <div class="gauges">
     <div class="gauge-box">
-      <svg class="gauge-svg" viewBox="0 0 200 110">
-        <path class="gauge-arc" d="M 15 95 A 85 85 0 0 1 185 95"></path>
-        <path class="gauge-arc-glow" d="M 15 95 A 85 85 0 0 1 185 95"></path>
+      <svg class="gauge-svg" viewBox="0 0 200 180">
+        <path class="gauge-arc" id="tempArc"></path>
+        <path class="gauge-arc-glow" id="tempGlow"></path>
+        <path class="gauge-band-amarela" id="tempAmarela"></path>
+        <path class="gauge-band-vermelha" id="tempVermelha"></path>
         <line class="gauge-needle" id="needleTemp" x1="100" y1="95" x2="100" y2="20"></line>
         <circle class="gauge-pivot" cx="100" cy="95" r="5"></circle>
       </svg>
@@ -581,9 +585,11 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="gauge-box">
-      <svg class="gauge-svg" viewBox="0 0 200 110">
-        <path class="gauge-arc" d="M 15 95 A 85 85 0 0 1 185 95"></path>
-        <path class="gauge-arc-glow" d="M 15 95 A 85 85 0 0 1 185 95"></path>
+      <svg class="gauge-svg" viewBox="0 0 200 180">
+        <path class="gauge-arc" id="pressArc"></path>
+        <path class="gauge-arc-glow" id="pressGlow"></path>
+        <path class="gauge-band-amarela" id="pressAmarela"></path>
+        <path class="gauge-band-vermelha" id="pressVermelha"></path>
         <line class="gauge-needle" id="needlePress" x1="100" y1="95" x2="100" y2="20"></line>
         <circle class="gauge-pivot" cx="100" cy="95" r="5"></circle>
       </svg>
@@ -625,16 +631,72 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     elStatus.className = 'status ' + (ok ? 'ok' : 'warn');
   }
 
+  // ---------- Geometria dos gauges ----------
+  // Convencao: valor 0 fica na HORIZONTAL ESQUERDA (-90 graus), o
+  // valor maximo (max) fica na HORIZONTAL DIREITA (+90 graus), com
+  // 1 grau de rotacao por (max/180) unidades de valor. Valores
+  // negativos (abaixo de 0, ex: vacuo/depressao) ficam ALEM da
+  // horizontal esquerda (menos que -90 graus) - por isso os gauges
+  // usam um arco MAIOR que um semicirculo simples.
+  function anguloValor(valor, max) {
+    return -90 + (valor / max) * 180;
+  }
+
   function anguloGauge(valor, min, max) {
     var v = Math.max(min, Math.min(max, valor));
-    var proporcao = (v - min) / (max - min);
-    return -90 + proporcao * 180; // -90=esquerda, 0=cima, 90=direita
+    return anguloValor(v, max);
+  }
+
+  // Ponto sobre o arco (raio "raio", centro fixo em 100,95) para um
+  // dado angulo, na mesma convencao acima.
+  function pontoArco(anguloGraus, raio) {
+    var rad = anguloGraus * Math.PI / 180;
+    return { x: 100 + raio * Math.sin(rad), y: 95 - raio * Math.cos(rad) };
+  }
+
+  // Monta o "d" de um path SVG de arco entre dois angulos (sempre no
+  // sentido crescente/horario), escolhendo automaticamente o
+  // large-arc-flag correto quando o trecho passa de 180 graus.
+  function arcoPath(anguloInicial, anguloFinal, raio) {
+    var p1 = pontoArco(anguloInicial, raio);
+    var p2 = pontoArco(anguloFinal, raio);
+    var largeArc = (anguloFinal - anguloInicial) > 180 ? 1 : 0;
+    return 'M ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
+           ' A ' + raio + ' ' + raio + ' 0 ' + largeArc + ' 1 ' +
+           p2.x.toFixed(2) + ' ' + p2.y.toFixed(2);
+  }
+
+  // Configura um gauge por completo: arco de fundo, brilho, e as
+  // faixas amarela/vermelha, calculando tudo a partir de min/max e
+  // dos limites das faixas - nao ha nenhum numero de angulo
+  // "hardcoded" no HTML, tudo e derivado matematicamente aqui.
+  function configurarGauge(prefixo, min, max, amarelaIni, amarelaFim, vermelhaIni) {
+    var anguloMin = anguloValor(min, max);
+    var anguloMax = anguloValor(max, max); // sempre 90
+
+    document.getElementById(prefixo + 'Arc').setAttribute('d', arcoPath(anguloMin, anguloMax, 85));
+    document.getElementById(prefixo + 'Glow').setAttribute('d', arcoPath(anguloMin, anguloMax, 85));
+
+    var angAmarelaIni = anguloValor(amarelaIni, max);
+    var angAmarelaFim = anguloValor(amarelaFim, max);
+    var angVermelhaIni = anguloValor(vermelhaIni, max);
+
+    document.getElementById(prefixo + 'Amarela').setAttribute('d', arcoPath(angAmarelaIni, angAmarelaFim, 85));
+    document.getElementById(prefixo + 'Vermelha').setAttribute('d', arcoPath(angVermelhaIni, anguloMax, 85));
   }
 
   function atualizarGauge(needleEl, valor, min, max) {
     var angulo = anguloGauge(valor, min, max);
-    needleEl.style.transform = 'rotate(' + angulo + 'deg)';
+    // Usa o atributo "transform" nativo do SVG (rotate com centro
+    // explicito em coordenadas do viewBox), em vez de CSS
+    // transform-origin - isso evita bug de pivo desalinhado quando o
+    // SVG e redimensionado responsivamente pelo CSS (width:100%).
+    needleEl.setAttribute('transform', 'rotate(' + angulo + ' 100 95)');
   }
+
+  // Monta os dois gauges com as faixas amarela/vermelha configuradas
+  configurarGauge('temp', TEMP_MIN, TEMP_MAX, 95, 110, 120);
+  configurarGauge('press', PRESS_MIN, PRESS_MAX, 1.0, 1.2, 1.2);
 
   function atualizarSomTexto() {
     if (numAudios > 0) {
