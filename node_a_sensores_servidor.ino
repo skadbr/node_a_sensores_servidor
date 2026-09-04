@@ -487,8 +487,8 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   svg.gauge-svg { width: 100%; height: auto; }
   .gauge-arc { fill: none; stroke: #16405c; stroke-width: 8; }
   .gauge-arc-glow { fill: none; stroke: #0af0ff; stroke-width: 2; opacity: 0.5; }
-  .gauge-band-amarela { fill: none; stroke: #ffcc00; stroke-width: 8; }
-  .gauge-band-vermelha { fill: none; stroke: #ff3030; stroke-width: 8; }
+  .gauge-band-amarela { fill: #ffcc0055; stroke: #ffcc00; stroke-width: 1; }
+  .gauge-band-vermelha { fill: #ff303055; stroke: #ff3030; stroke-width: 1; }
   .gauge-needle { stroke: #ffe14d; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 4px #ffcc00); transition: transform 0.25s ease-out; }
   .gauge-pivot { fill: #ffe14d; }
   .gauge-tick { stroke: #2c6a8f; stroke-width: 1.5; }
@@ -656,7 +656,8 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
 
   // Monta o "d" de um path SVG de arco entre dois angulos (sempre no
   // sentido crescente/horario), escolhendo automaticamente o
-  // large-arc-flag correto quando o trecho passa de 180 graus.
+  // large-arc-flag correto quando o trecho passa de 180 graus. Usado
+  // para o arco de fundo (so a linha/anel, sem preenchimento).
   function arcoPath(anguloInicial, anguloFinal, raio) {
     var p1 = pontoArco(anguloInicial, raio);
     var p2 = pontoArco(anguloFinal, raio);
@@ -666,11 +667,28 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
            p2.x.toFixed(2) + ' ' + p2.y.toFixed(2);
   }
 
+  // Monta o "d" de uma FATIA preenchida (tipo "pizza"): sai do centro
+  // do ponteiro (pivo), vai ate a borda do arco, contorna ate o
+  // angulo final, e volta reto para o centro, fechando a forma. Usado
+  // para as faixas amarela/vermelha, que devem ser preenchidas desde
+  // o centro (nao so uma linha fina na borda).
+  function fatiaPath(anguloInicial, anguloFinal, raio) {
+    var p1 = pontoArco(anguloInicial, raio);
+    var p2 = pontoArco(anguloFinal, raio);
+    var largeArc = (anguloFinal - anguloInicial) > 180 ? 1 : 0;
+    return 'M 100 95 L ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
+           ' A ' + raio + ' ' + raio + ' 0 ' + largeArc + ' 1 ' +
+           p2.x.toFixed(2) + ' ' + p2.y.toFixed(2) + ' Z';
+  }
+
   // Configura um gauge por completo: arco de fundo, brilho, e as
-  // faixas amarela/vermelha, calculando tudo a partir de min/max e
-  // dos limites das faixas - nao ha nenhum numero de angulo
-  // "hardcoded" no HTML, tudo e derivado matematicamente aqui.
-  function configurarGauge(prefixo, min, max, amarelaIni, amarelaFim, vermelhaIni) {
+  // faixas amarela/vermelha (preenchidas desde o centro), calculando
+  // tudo a partir de min/max e dos limites das faixas - nao ha nenhum
+  // numero de angulo "hardcoded" no HTML, tudo e derivado
+  // matematicamente aqui. O fim da faixa amarela e sempre igual ao
+  // inicio da faixa vermelha, para nao sobrar nenhum "gap" sem cor
+  // entre as duas.
+  function configurarGauge(prefixo, min, max, amarelaIni, vermelhaIni) {
     var anguloMin = anguloValor(min, max);
     var anguloMax = anguloValor(max, max); // sempre 90
 
@@ -678,11 +696,11 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     document.getElementById(prefixo + 'Glow').setAttribute('d', arcoPath(anguloMin, anguloMax, 85));
 
     var angAmarelaIni = anguloValor(amarelaIni, max);
-    var angAmarelaFim = anguloValor(amarelaFim, max);
     var angVermelhaIni = anguloValor(vermelhaIni, max);
 
-    document.getElementById(prefixo + 'Amarela').setAttribute('d', arcoPath(angAmarelaIni, angAmarelaFim, 85));
-    document.getElementById(prefixo + 'Vermelha').setAttribute('d', arcoPath(angVermelhaIni, anguloMax, 85));
+    // Amarelo vai do seu inicio ate o inicio do vermelho (sem gap)
+    document.getElementById(prefixo + 'Amarela').setAttribute('d', fatiaPath(angAmarelaIni, angVermelhaIni, 85));
+    document.getElementById(prefixo + 'Vermelha').setAttribute('d', fatiaPath(angVermelhaIni, anguloMax, 85));
   }
 
   function atualizarGauge(needleEl, valor, min, max) {
@@ -694,9 +712,11 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     needleEl.setAttribute('transform', 'rotate(' + angulo + ' 100 95)');
   }
 
-  // Monta os dois gauges com as faixas amarela/vermelha configuradas
-  configurarGauge('temp', TEMP_MIN, TEMP_MAX, 95, 110, 120);
-  configurarGauge('press', PRESS_MIN, PRESS_MAX, 1.0, 1.2, 1.2);
+  // Monta os dois gauges: inicio da faixa amarela e inicio da
+  // vermelha (o amarelo sempre termina exatamente onde o vermelho
+  // comeca, sem gap sem cor entre as duas)
+  configurarGauge('temp', TEMP_MIN, TEMP_MAX, 95, 120);
+  configurarGauge('press', PRESS_MIN, PRESS_MAX, 1.0, 1.2);
 
   function atualizarSomTexto() {
     if (numAudios > 0) {
