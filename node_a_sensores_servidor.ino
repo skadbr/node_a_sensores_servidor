@@ -485,14 +485,17 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   .gauge-unidade { font-size: 13px; color: #7fb8cc; }
 
   svg.gauge-svg { width: 100%; height: auto; }
-  .gauge-arc { fill: none; stroke: #16405c; stroke-width: 8; }
-  .gauge-arc-glow { fill: none; stroke: #0af0ff; stroke-width: 2; opacity: 0.5; }
-  .gauge-band-amarela { fill: #ffcc0055; stroke: #ffcc00; stroke-width: 1; }
-  .gauge-band-vermelha { fill: #ff303055; stroke: #ff3030; stroke-width: 1; }
-  .gauge-needle { stroke: #ffe14d; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 4px #ffcc00); transition: transform 0.25s ease-out; }
-  .gauge-pivot { fill: #ffe14d; }
-  .gauge-tick { stroke: #2c6a8f; stroke-width: 1.5; }
-  .gauge-ticklabel { fill: #5fa8c9; font-size: 9px; text-anchor: middle; }
+  .gauge-bezel-out { fill: #0a1420; stroke: #3a2a05; stroke-width: 3; }
+  .gauge-bezel-in { fill: #0d1830; stroke: #2c6a8f; stroke-width: 1.5; }
+  .gauge-arc { fill: none; stroke: #16405c; stroke-width: 6; }
+  .gauge-arc-glow { fill: none; stroke: #0af0ff; stroke-width: 1.5; opacity: 0.45; }
+  .gauge-band-amarela { fill: #ffcc0050; stroke: #ffcc00; stroke-width: 1; }
+  .gauge-band-vermelha { fill: #ff303050; stroke: #ff3030; stroke-width: 1; }
+  .gauge-needle { stroke: #ff2020; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 5px #ff0000cc); transition: transform 0.25s ease-out; }
+  .gauge-pivot { fill: #1a1a1a; stroke: #ff2020; stroke-width: 1.5; }
+  .gauge-tick { stroke: #ffcc0099; stroke-width: 1.5; }
+  .gauge-ticklabel { fill: #e8d8a0; font-size: 11px; text-anchor: middle; dominant-baseline: middle; font-weight: 600; }
+  .gauge-bat { fill: #ffcc0022; }
 
   .painel-som {
     margin-top: 22px;
@@ -572,26 +575,34 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
 
   <div class="gauges">
     <div class="gauge-box">
-      <svg class="gauge-svg" viewBox="0 0 200 180">
+      <svg class="gauge-svg" viewBox="0 0 220 220">
+        <circle class="gauge-bezel-out" cx="110" cy="110" r="104"></circle>
+        <circle class="gauge-bezel-in" cx="110" cy="110" r="96"></circle>
         <path class="gauge-arc" id="tempArc"></path>
         <path class="gauge-arc-glow" id="tempGlow"></path>
         <path class="gauge-band-amarela" id="tempAmarela"></path>
         <path class="gauge-band-vermelha" id="tempVermelha"></path>
-        <line class="gauge-needle" id="needleTemp" x1="100" y1="95" x2="100" y2="20"></line>
-        <circle class="gauge-pivot" cx="100" cy="95" r="5"></circle>
+        <g id="tempTicks"></g>
+        <path class="gauge-bat" d="M110,95 Q95,75 70,80 Q85,90 88,100 Q75,98 60,108 Q80,112 88,118 Q80,128 85,138 Q95,128 100,120 Q105,132 110,140 Q115,132 120,120 Q125,128 135,138 Q140,128 132,118 Q140,112 160,108 Q145,98 132,100 Q135,90 150,80 Q125,75 110,95 Z"></path>
+        <line class="gauge-needle" id="needleTemp" x1="110" y1="110" x2="110" y2="45"></line>
+        <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
       </svg>
       <div class="gauge-valor"><span id="valTemp">--</span><span class="gauge-unidade"> &deg;C</span></div>
       <div class="gauge-label">TEMPERATURA</div>
     </div>
 
     <div class="gauge-box">
-      <svg class="gauge-svg" viewBox="0 0 200 180">
+      <svg class="gauge-svg" viewBox="0 0 220 220">
+        <circle class="gauge-bezel-out" cx="110" cy="110" r="104"></circle>
+        <circle class="gauge-bezel-in" cx="110" cy="110" r="96"></circle>
         <path class="gauge-arc" id="pressArc"></path>
         <path class="gauge-arc-glow" id="pressGlow"></path>
         <path class="gauge-band-amarela" id="pressAmarela"></path>
         <path class="gauge-band-vermelha" id="pressVermelha"></path>
-        <line class="gauge-needle" id="needlePress" x1="100" y1="95" x2="100" y2="20"></line>
-        <circle class="gauge-pivot" cx="100" cy="95" r="5"></circle>
+        <g id="pressTicks"></g>
+        <path class="gauge-bat" d="M110,95 Q95,75 70,80 Q85,90 88,100 Q75,98 60,108 Q80,112 88,118 Q80,128 85,138 Q95,128 100,120 Q105,132 110,140 Q115,132 120,120 Q125,128 135,138 Q140,128 132,118 Q140,112 160,108 Q145,98 132,100 Q135,90 150,80 Q125,75 110,95 Z"></path>
+        <line class="gauge-needle" id="needlePress" x1="110" y1="110" x2="110" y2="45"></line>
+        <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
       </svg>
       <div class="gauge-valor"><span id="valPress">--</span><span class="gauge-unidade"> bar</span></div>
       <div class="gauge-label">TURBO BOOST</div>
@@ -647,11 +658,18 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     return anguloValor(v, max);
   }
 
-  // Ponto sobre o arco (raio "raio", centro fixo em 100,95) para um
-  // dado angulo, na mesma convencao acima.
+  // Centro do mostrador (mesmo para todos os gauges) e raios usados
+  // para desenhar arco, faixas e marcacoes.
+  var GAUGE_CX = 110, GAUGE_CY = 110;
+  var RAIO_ARCO = 88;
+  var RAIO_TICK_IN = 78, RAIO_TICK_OUT = 88;
+  var RAIO_LABEL = 100;
+
+  // Ponto sobre um circulo de raio "raio" centrado no gauge, para um
+  // dado angulo (mesma convencao: 0=cima, -90=esquerda, 90=direita).
   function pontoArco(anguloGraus, raio) {
     var rad = anguloGraus * Math.PI / 180;
-    return { x: 100 + raio * Math.sin(rad), y: 95 - raio * Math.cos(rad) };
+    return { x: GAUGE_CX + raio * Math.sin(rad), y: GAUGE_CY - raio * Math.cos(rad) };
   }
 
   // Monta o "d" de um path SVG de arco entre dois angulos (sempre no
@@ -676,31 +694,65 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     var p1 = pontoArco(anguloInicial, raio);
     var p2 = pontoArco(anguloFinal, raio);
     var largeArc = (anguloFinal - anguloInicial) > 180 ? 1 : 0;
-    return 'M 100 95 L ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
+    return 'M ' + GAUGE_CX + ' ' + GAUGE_CY + ' L ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
            ' A ' + raio + ' ' + raio + ' 0 ' + largeArc + ' 1 ' +
            p2.x.toFixed(2) + ' ' + p2.y.toFixed(2) + ' Z';
   }
 
-  // Configura um gauge por completo: arco de fundo, brilho, e as
-  // faixas amarela/vermelha (preenchidas desde o centro), calculando
-  // tudo a partir de min/max e dos limites das faixas - nao ha nenhum
-  // numero de angulo "hardcoded" no HTML, tudo e derivado
-  // matematicamente aqui. O fim da faixa amarela e sempre igual ao
-  // inicio da faixa vermelha, para nao sobrar nenhum "gap" sem cor
-  // entre as duas.
-  function configurarGauge(prefixo, min, max, amarelaIni, vermelhaIni) {
+  // Cria um elemento SVG (precisa do namespace correto, diferente de
+  // elementos HTML comuns).
+  function criarSVGEl(tag, attrs) {
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  // Desenha as marcacoes (tracinhos + numeros) ao redor do mostrador,
+  // nas posicoes calculadas a partir dos valores reais informados -
+  // nada de posicao fixa "no olho", tudo derivado da mesma formula
+  // usada para o ponteiro.
+  function desenharMarcacoes(grupoId, valores, max) {
+    var grupo = document.getElementById(grupoId);
+    valores.forEach(function (v) {
+      var ang = anguloValor(v, max);
+      var pIn = pontoArco(ang, RAIO_TICK_IN);
+      var pOut = pontoArco(ang, RAIO_TICK_OUT);
+
+      grupo.appendChild(criarSVGEl('line', {
+        class: 'gauge-tick',
+        x1: pIn.x.toFixed(2), y1: pIn.y.toFixed(2),
+        x2: pOut.x.toFixed(2), y2: pOut.y.toFixed(2)
+      }));
+
+      var pLabel = pontoArco(ang, RAIO_LABEL);
+      var texto = criarSVGEl('text', {
+        class: 'gauge-ticklabel',
+        x: pLabel.x.toFixed(2), y: pLabel.y.toFixed(2)
+      });
+      texto.textContent = v;
+      grupo.appendChild(texto);
+    });
+  }
+
+  // Configura um gauge por completo: arco de fundo, brilho, faixas
+  // amarela/vermelha (preenchidas desde o centro) e as marcacoes
+  // numeradas - tudo calculado a partir de min/max e dos limites das
+  // faixas, sem nenhum numero de angulo "hardcoded" no HTML.
+  function configurarGauge(prefixo, min, max, amarelaIni, vermelhaIni, marcacoes) {
     var anguloMin = anguloValor(min, max);
     var anguloMax = anguloValor(max, max); // sempre 90
 
-    document.getElementById(prefixo + 'Arc').setAttribute('d', arcoPath(anguloMin, anguloMax, 85));
-    document.getElementById(prefixo + 'Glow').setAttribute('d', arcoPath(anguloMin, anguloMax, 85));
+    document.getElementById(prefixo + 'Arc').setAttribute('d', arcoPath(anguloMin, anguloMax, RAIO_ARCO));
+    document.getElementById(prefixo + 'Glow').setAttribute('d', arcoPath(anguloMin, anguloMax, RAIO_ARCO));
 
     var angAmarelaIni = anguloValor(amarelaIni, max);
     var angVermelhaIni = anguloValor(vermelhaIni, max);
 
     // Amarelo vai do seu inicio ate o inicio do vermelho (sem gap)
-    document.getElementById(prefixo + 'Amarela').setAttribute('d', fatiaPath(angAmarelaIni, angVermelhaIni, 85));
-    document.getElementById(prefixo + 'Vermelha').setAttribute('d', fatiaPath(angVermelhaIni, anguloMax, 85));
+    document.getElementById(prefixo + 'Amarela').setAttribute('d', fatiaPath(angAmarelaIni, angVermelhaIni, RAIO_ARCO));
+    document.getElementById(prefixo + 'Vermelha').setAttribute('d', fatiaPath(angVermelhaIni, anguloMax, RAIO_ARCO));
+
+    desenharMarcacoes(prefixo + 'Ticks', marcacoes, max);
   }
 
   function atualizarGauge(needleEl, valor, min, max) {
@@ -709,14 +761,14 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     // explicito em coordenadas do viewBox), em vez de CSS
     // transform-origin - isso evita bug de pivo desalinhado quando o
     // SVG e redimensionado responsivamente pelo CSS (width:100%).
-    needleEl.setAttribute('transform', 'rotate(' + angulo + ' 100 95)');
+    needleEl.setAttribute('transform', 'rotate(' + angulo + ' ' + GAUGE_CX + ' ' + GAUGE_CY + ')');
   }
 
   // Monta os dois gauges: inicio da faixa amarela e inicio da
   // vermelha (o amarelo sempre termina exatamente onde o vermelho
   // comeca, sem gap sem cor entre as duas)
-  configurarGauge('temp', TEMP_MIN, TEMP_MAX, 95, 120);
-  configurarGauge('press', PRESS_MIN, PRESS_MAX, 1.0, 1.2);
+  configurarGauge('temp', TEMP_MIN, TEMP_MAX, 95, 120, [-30, 0, 50, 100, 150, 180]);
+  configurarGauge('press', PRESS_MIN, PRESS_MAX, 1.0, 1.2, [-0.5, 0, 0.5, 1, 1.5, 2]);
 
   function atualizarSomTexto() {
     if (numAudios > 0) {
