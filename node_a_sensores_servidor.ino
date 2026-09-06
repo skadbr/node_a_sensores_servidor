@@ -380,6 +380,148 @@ void lerQuantidadeAudios(uint8_t num) {
 // via WebSocket na mesma porta 81 que o Node B ja usa - o Node A
 // responde aos dois ao mesmo tempo, sem nenhuma logica extra
 // necessaria no C++ (o WebSocketsServer ja suporta varios clientes).
+// ==========================================================
+// ---------- Imagens de fundo dos gauges (SVG, editaveis) ----------
+// Cada uma fica guardada separadamente na memoria flash (PROGMEM) e
+// e servida pelo Node A numa URL propria (/gauge_temp_bg.svg e
+// /gauge_press_bg.svg). O ponteiro (agulha) NAO faz parte dessas
+// imagens - ele e um SVG pequeno e transparente, desenhado por cima
+// via JavaScript (ver PAGE_HTML mais abaixo), cuja logica de angulo
+// e generica e funciona para qualquer fundo.
+//
+// PARA TROCAR O DESIGN DO FUNDO: basta substituir todo o conteudo
+// entre os R"rawliteral( ... )rawliteral" abaixo pelo novo codigo SVG
+// (gerado no Inkscape, CorelDraw, etc) e gravar de novo no Node A -
+// nao e necessario mexer em mais nada no resto do codigo, contanto
+// que a escala de valores usada no desenho continue batendo com as
+// constantes TEMP_MIN/TEMP_MAX e PRESS_MIN/PRESS_MAX definidas no
+// JavaScript (dentro de PAGE_HTML).
+
+
+const char GAUGE_TEMP_BG_SVG[] PROGMEM = R"rawliteral(<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
+  <defs>
+    <radialGradient id="gradFundo" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#121A24"/>
+      <stop offset="70%" stop-color="#080C12"/>
+      <stop offset="100%" stop-color="#020305"/>
+    </radialGradient>
+    <radialGradient id="gradBrilhoBat" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFCC00" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#FFCC00" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#FFCC00" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Bezel externo -->
+  <circle cx="110" cy="110" r="104" fill="url(#gradFundo)" stroke="#000000" stroke-width="4"/>
+  <circle cx="110" cy="110" r="101" fill="none" stroke="#756E6E" stroke-width="1.5" stroke-opacity="0.8"/>
+  <circle cx="110" cy="110" r="96" fill="none" stroke="#8A7322" stroke-width="1" stroke-opacity="0.6"/>
+
+  <!-- Arco de fundo e brilho dourado -->
+  <path d="M 33.79 154.00 A 88 88 0 1 1 198.00 110.00" fill="none" stroke="#3a2e10" stroke-width="6"/>
+  <path d="M 33.79 154.00 A 88 88 0 1 1 198.00 110.00" fill="none" stroke="#FFCC00" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Faixas coloridas (preenchidas do centro) -->
+  <path d="M 110 110 L 117.67 22.33 A 88 88 0 0 1 154.00 33.79 Z" fill="#ffcc0050" stroke="#ffcc00" stroke-width="1"/>
+  <path d="M 110 110 L 154.00 33.79 A 88 88 0 0 1 198.00 110.00 Z" fill="#ff303050" stroke="#ff3030" stroke-width="1"/>
+
+  <!-- Marcacoes numeradas -->
+  <g>
+    <line x1="44.18" y1="148.00" x2="33.79" y2="154.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="23.40" y="160.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">-30</text>
+    <line x1="34.00" y1="110.00" x2="22.00" y2="110.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="10.00" y="110.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">0</text>
+    <line x1="61.15" y1="51.78" x2="53.43" y2="42.59" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="45.72" y="33.40" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">50</text>
+    <line x1="123.20" y1="35.15" x2="125.28" y2="23.34" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="127.36" y="11.52" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">100</text>
+    <line x1="175.82" y1="72.00" x2="186.21" y2="66.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="196.60" y="60.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">150</text>
+    <line x1="186.00" y1="110.00" x2="198.00" y2="110.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="210.00" y="110.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">180</text>
+  </g>
+
+  <!-- Brilho dourado atras do emblema -->
+  <circle cx="110" cy="110" r="40" fill="url(#gradBrilhoBat)"/>
+
+  <!-- Simbolo do morcego -->
+  <path d="M110,88 Q92,64 62,70 Q80,82 84,95 Q68,92 50,104 Q74,109 84,116 Q74,128 80,140 Q92,128 98,118 Q104,132 110,142 Q116,132 122,118 Q128,128 140,140 Q146,128 136,116 Q146,109 170,104 Q152,92 136,95 Q140,82 158,70 Q128,64 110,88 Z" fill="#0a0a0a" stroke="#FFCC00" stroke-width="1" stroke-opacity="0.5"/>
+
+  <!-- Titulo -->
+  <text x="110" y="168" fill="#FFCC00" font-size="15" font-family="Arial, sans-serif" font-weight="800" letter-spacing="2" text-anchor="middle">TEMPERATURA</text>
+
+  <!-- Sub-labels estilo "BAT-TECH" / "ENGINE TEMP" -->
+  <text x="55" y="186" fill="#8A7322" font-size="8" font-family="Arial, sans-serif" font-weight="700" letter-spacing="1" text-anchor="middle">&#9664; BAT-TECH</text>
+  <text x="165" y="186" fill="#8A7322" font-size="8" font-family="Arial, sans-serif" font-weight="700" letter-spacing="1" text-anchor="middle">ENGINE TEMP &#9654;</text>
+</svg>
+)rawliteral";
+
+const char GAUGE_PRESS_BG_SVG[] PROGMEM = R"rawliteral(<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
+  <defs>
+    <radialGradient id="gradFundo" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#121A24"/>
+      <stop offset="70%" stop-color="#080C12"/>
+      <stop offset="100%" stop-color="#020305"/>
+    </radialGradient>
+    <radialGradient id="gradBrilhoBat" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFCC00" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#FFCC00" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#FFCC00" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Bezel externo -->
+  <circle cx="110" cy="110" r="104" fill="url(#gradFundo)" stroke="#000000" stroke-width="4"/>
+  <circle cx="110" cy="110" r="101" fill="none" stroke="#756E6E" stroke-width="1.5" stroke-opacity="0.8"/>
+  <circle cx="110" cy="110" r="96" fill="none" stroke="#8A7322" stroke-width="1" stroke-opacity="0.6"/>
+
+  <!-- Arco de fundo e brilho dourado -->
+  <path d="M 47.77 172.23 A 88 88 0 1 1 198.00 110.00" fill="none" stroke="#3a2e10" stroke-width="6"/>
+  <path d="M 47.77 172.23 A 88 88 0 1 1 198.00 110.00" fill="none" stroke="#FFCC00" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Faixas coloridas (preenchidas do centro) -->
+  <path d="M 110 110 L 110.00 22.00 A 88 88 0 0 1 137.19 26.31 Z" fill="#ffcc0050" stroke="#ffcc00" stroke-width="1"/>
+  <path d="M 110 110 L 137.19 26.31 A 88 88 0 0 1 198.00 110.00 Z" fill="#ff303050" stroke="#ff3030" stroke-width="1"/>
+
+  <!-- Marcacoes numeradas -->
+  <g>
+    <line x1="56.26" y1="163.74" x2="47.77" y2="172.23" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="39.29" y="180.71" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">-0.5</text>
+    <line x1="34.00" y1="110.00" x2="22.00" y2="110.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="10.00" y="110.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">0</text>
+    <line x1="56.26" y1="56.26" x2="47.77" y2="47.77" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="39.29" y="39.29" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">0.5</text>
+    <line x1="110.00" y1="34.00" x2="110.00" y2="22.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="110.00" y="10.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">1</text>
+    <line x1="163.74" y1="56.26" x2="172.23" y2="47.77" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="180.71" y="39.29" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">1.5</text>
+    <line x1="186.00" y1="110.00" x2="198.00" y2="110.00" stroke="#FFCC00" stroke-width="3" stroke-linecap="round"/>
+    <text x="210.00" y="110.00" fill="#E8D8A0" font-size="12" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="middle">2</text>
+  </g>
+
+  <!-- Brilho dourado atras do emblema -->
+  <circle cx="110" cy="110" r="40" fill="url(#gradBrilhoBat)"/>
+
+  <!-- Simbolo do morcego -->
+  <path d="M110,88 Q92,64 62,70 Q80,82 84,95 Q68,92 50,104 Q74,109 84,116 Q74,128 80,140 Q92,128 98,118 Q104,132 110,142 Q116,132 122,118 Q128,128 140,140 Q146,128 136,116 Q146,109 170,104 Q152,92 136,95 Q140,82 158,70 Q128,64 110,88 Z" fill="#0a0a0a" stroke="#FFCC00" stroke-width="1" stroke-opacity="0.5"/>
+
+  <!-- Titulo -->
+  <text x="110" y="168" fill="#FFCC00" font-size="15" font-family="Arial, sans-serif" font-weight="800" letter-spacing="2" text-anchor="middle">TURBO BOOST</text>
+
+  <!-- Sub-labels estilo "BAT-TECH" / "ENGINE TEMP" -->
+  <text x="55" y="186" fill="#8A7322" font-size="8" font-family="Arial, sans-serif" font-weight="700" letter-spacing="1" text-anchor="middle">&#9664; BAT-TECH</text>
+  <text x="165" y="186" fill="#8A7322" font-size="8" font-family="Arial, sans-serif" font-weight="700" letter-spacing="1" text-anchor="middle">BOOST PSI &#9654;</text>
+</svg>
+)rawliteral";
+
+void handleGaugeTempBg() {
+  httpServer.send_P(200, "image/svg+xml", GAUGE_TEMP_BG_SVG);
+}
+
+void handleGaugePressBg() {
+  httpServer.send_P(200, "image/svg+xml", GAUGE_PRESS_BG_SVG);
+}
+
 const char PAGE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -484,18 +626,19 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   }
   .gauge-unidade { font-size: 13px; color: #7fb8cc; }
 
-  svg.gauge-svg { width: 100%; height: auto; }
-  .gauge-bezel-out { fill: #0a1420; stroke: #3a2a05; stroke-width: 3; }
-  .gauge-bezel-in { fill: #0d1830; stroke: #2c6a8f; stroke-width: 1.5; }
-  .gauge-arc { fill: none; stroke: #16405c; stroke-width: 6; }
-  .gauge-arc-glow { fill: none; stroke: #0af0ff; stroke-width: 1.5; opacity: 0.45; }
-  .gauge-band-amarela { fill: #ffcc0050; stroke: #ffcc00; stroke-width: 1; }
-  .gauge-band-vermelha { fill: #ff303050; stroke: #ff3030; stroke-width: 1; }
+  /* Camadas do gauge: a imagem de fundo (bezel, marcacoes, faixas,
+     tudo isso vem do arquivo SVG externo - editavel sem mexer aqui)
+     e o SVG do ponteiro ficam exatamente sobrepostos, um por cima do
+     outro, ocupando o mesmo espaco. */
+  .gauge-camadas { position: relative; width: 100%; }
+  .gauge-bg-img { display: block; width: 100%; height: auto; }
+  svg.gauge-needle-svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
   .gauge-needle { stroke: #ff2020; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 5px #ff0000cc); transition: transform 0.25s ease-out; }
   .gauge-pivot { fill: #1a1a1a; stroke: #ff2020; stroke-width: 1.5; }
-  .gauge-tick { stroke: #ffcc0099; stroke-width: 1.5; }
-  .gauge-ticklabel { fill: #e8d8a0; font-size: 11px; text-anchor: middle; dominant-baseline: middle; font-weight: 600; }
-  .gauge-bat { fill: #ffcc0022; }
 
   .painel-som {
     margin-top: 22px;
@@ -575,37 +718,25 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
 
   <div class="gauges">
     <div class="gauge-box">
-      <svg class="gauge-svg" viewBox="0 0 220 220">
-        <circle class="gauge-bezel-out" cx="110" cy="110" r="104"></circle>
-        <circle class="gauge-bezel-in" cx="110" cy="110" r="96"></circle>
-        <path class="gauge-arc" id="tempArc"></path>
-        <path class="gauge-arc-glow" id="tempGlow"></path>
-        <path class="gauge-band-amarela" id="tempAmarela"></path>
-        <path class="gauge-band-vermelha" id="tempVermelha"></path>
-        <g id="tempTicks"></g>
-        <path class="gauge-bat" d="M110,95 Q95,75 70,80 Q85,90 88,100 Q75,98 60,108 Q80,112 88,118 Q80,128 85,138 Q95,128 100,120 Q105,132 110,140 Q115,132 120,120 Q125,128 135,138 Q140,128 132,118 Q140,112 160,108 Q145,98 132,100 Q135,90 150,80 Q125,75 110,95 Z"></path>
-        <line class="gauge-needle" id="needleTemp" x1="110" y1="110" x2="110" y2="45"></line>
-        <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
-      </svg>
+      <div class="gauge-camadas">
+        <img class="gauge-bg-img" src="/gauge_temp_bg.svg" alt="Mostrador temperatura">
+        <svg class="gauge-needle-svg" viewBox="0 0 220 220">
+          <line class="gauge-needle" id="needleTemp" x1="110" y1="110" x2="110" y2="45"></line>
+          <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
+        </svg>
+      </div>
       <div class="gauge-valor"><span id="valTemp">--</span><span class="gauge-unidade"> &deg;C</span></div>
-      <div class="gauge-label">TEMPERATURA</div>
     </div>
 
     <div class="gauge-box">
-      <svg class="gauge-svg" viewBox="0 0 220 220">
-        <circle class="gauge-bezel-out" cx="110" cy="110" r="104"></circle>
-        <circle class="gauge-bezel-in" cx="110" cy="110" r="96"></circle>
-        <path class="gauge-arc" id="pressArc"></path>
-        <path class="gauge-arc-glow" id="pressGlow"></path>
-        <path class="gauge-band-amarela" id="pressAmarela"></path>
-        <path class="gauge-band-vermelha" id="pressVermelha"></path>
-        <g id="pressTicks"></g>
-        <path class="gauge-bat" d="M110,95 Q95,75 70,80 Q85,90 88,100 Q75,98 60,108 Q80,112 88,118 Q80,128 85,138 Q95,128 100,120 Q105,132 110,140 Q115,132 120,120 Q125,128 135,138 Q140,128 132,118 Q140,112 160,108 Q145,98 132,100 Q135,90 150,80 Q125,75 110,95 Z"></path>
-        <line class="gauge-needle" id="needlePress" x1="110" y1="110" x2="110" y2="45"></line>
-        <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
-      </svg>
+      <div class="gauge-camadas">
+        <img class="gauge-bg-img" src="/gauge_press_bg.svg" alt="Mostrador pressao">
+        <svg class="gauge-needle-svg" viewBox="0 0 220 220">
+          <line class="gauge-needle" id="needlePress" x1="110" y1="110" x2="110" y2="45"></line>
+          <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
+        </svg>
+      </div>
       <div class="gauge-valor"><span id="valPress">--</span><span class="gauge-unidade"> bar</span></div>
-      <div class="gauge-label">TURBO BOOST</div>
     </div>
   </div>
 
@@ -642,13 +773,15 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     elStatus.className = 'status ' + (ok ? 'ok' : 'warn');
   }
 
-  // ---------- Geometria dos gauges ----------
+  // ---------- Geometria do ponteiro ----------
   // Convencao: valor 0 fica na HORIZONTAL ESQUERDA (-90 graus), o
-  // valor maximo (max) fica na HORIZONTAL DIREITA (+90 graus), com
-  // 1 grau de rotacao por (max/180) unidades de valor. Valores
-  // negativos (abaixo de 0, ex: vacuo/depressao) ficam ALEM da
-  // horizontal esquerda (menos que -90 graus) - por isso os gauges
-  // usam um arco MAIOR que um semicirculo simples.
+  // valor maximo (max) fica na HORIZONTAL DIREITA (+90 graus). Essa
+  // mesma convencao foi usada para desenhar as marcacoes na imagem
+  // de fundo (gauge_temp_bg.svg / gauge_press_bg.svg) - se voce
+  // trocar o fundo por um desenho com outra faixa de valores, ajuste
+  // TEMP_MIN/MAX ou PRESS_MIN/MAX abaixo para bater com o novo fundo.
+  var GAUGE_CX = 110, GAUGE_CY = 110;
+
   function anguloValor(valor, max) {
     return -90 + (valor / max) * 180;
   }
@@ -656,103 +789,6 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   function anguloGauge(valor, min, max) {
     var v = Math.max(min, Math.min(max, valor));
     return anguloValor(v, max);
-  }
-
-  // Centro do mostrador (mesmo para todos os gauges) e raios usados
-  // para desenhar arco, faixas e marcacoes.
-  var GAUGE_CX = 110, GAUGE_CY = 110;
-  var RAIO_ARCO = 88;
-  var RAIO_TICK_IN = 78, RAIO_TICK_OUT = 88;
-  var RAIO_LABEL = 100;
-
-  // Ponto sobre um circulo de raio "raio" centrado no gauge, para um
-  // dado angulo (mesma convencao: 0=cima, -90=esquerda, 90=direita).
-  function pontoArco(anguloGraus, raio) {
-    var rad = anguloGraus * Math.PI / 180;
-    return { x: GAUGE_CX + raio * Math.sin(rad), y: GAUGE_CY - raio * Math.cos(rad) };
-  }
-
-  // Monta o "d" de um path SVG de arco entre dois angulos (sempre no
-  // sentido crescente/horario), escolhendo automaticamente o
-  // large-arc-flag correto quando o trecho passa de 180 graus. Usado
-  // para o arco de fundo (so a linha/anel, sem preenchimento).
-  function arcoPath(anguloInicial, anguloFinal, raio) {
-    var p1 = pontoArco(anguloInicial, raio);
-    var p2 = pontoArco(anguloFinal, raio);
-    var largeArc = (anguloFinal - anguloInicial) > 180 ? 1 : 0;
-    return 'M ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
-           ' A ' + raio + ' ' + raio + ' 0 ' + largeArc + ' 1 ' +
-           p2.x.toFixed(2) + ' ' + p2.y.toFixed(2);
-  }
-
-  // Monta o "d" de uma FATIA preenchida (tipo "pizza"): sai do centro
-  // do ponteiro (pivo), vai ate a borda do arco, contorna ate o
-  // angulo final, e volta reto para o centro, fechando a forma. Usado
-  // para as faixas amarela/vermelha, que devem ser preenchidas desde
-  // o centro (nao so uma linha fina na borda).
-  function fatiaPath(anguloInicial, anguloFinal, raio) {
-    var p1 = pontoArco(anguloInicial, raio);
-    var p2 = pontoArco(anguloFinal, raio);
-    var largeArc = (anguloFinal - anguloInicial) > 180 ? 1 : 0;
-    return 'M ' + GAUGE_CX + ' ' + GAUGE_CY + ' L ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
-           ' A ' + raio + ' ' + raio + ' 0 ' + largeArc + ' 1 ' +
-           p2.x.toFixed(2) + ' ' + p2.y.toFixed(2) + ' Z';
-  }
-
-  // Cria um elemento SVG (precisa do namespace correto, diferente de
-  // elementos HTML comuns).
-  function criarSVGEl(tag, attrs) {
-    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-    for (var k in attrs) el.setAttribute(k, attrs[k]);
-    return el;
-  }
-
-  // Desenha as marcacoes (tracinhos + numeros) ao redor do mostrador,
-  // nas posicoes calculadas a partir dos valores reais informados -
-  // nada de posicao fixa "no olho", tudo derivado da mesma formula
-  // usada para o ponteiro.
-  function desenharMarcacoes(grupoId, valores, max) {
-    var grupo = document.getElementById(grupoId);
-    valores.forEach(function (v) {
-      var ang = anguloValor(v, max);
-      var pIn = pontoArco(ang, RAIO_TICK_IN);
-      var pOut = pontoArco(ang, RAIO_TICK_OUT);
-
-      grupo.appendChild(criarSVGEl('line', {
-        class: 'gauge-tick',
-        x1: pIn.x.toFixed(2), y1: pIn.y.toFixed(2),
-        x2: pOut.x.toFixed(2), y2: pOut.y.toFixed(2)
-      }));
-
-      var pLabel = pontoArco(ang, RAIO_LABEL);
-      var texto = criarSVGEl('text', {
-        class: 'gauge-ticklabel',
-        x: pLabel.x.toFixed(2), y: pLabel.y.toFixed(2)
-      });
-      texto.textContent = v;
-      grupo.appendChild(texto);
-    });
-  }
-
-  // Configura um gauge por completo: arco de fundo, brilho, faixas
-  // amarela/vermelha (preenchidas desde o centro) e as marcacoes
-  // numeradas - tudo calculado a partir de min/max e dos limites das
-  // faixas, sem nenhum numero de angulo "hardcoded" no HTML.
-  function configurarGauge(prefixo, min, max, amarelaIni, vermelhaIni, marcacoes) {
-    var anguloMin = anguloValor(min, max);
-    var anguloMax = anguloValor(max, max); // sempre 90
-
-    document.getElementById(prefixo + 'Arc').setAttribute('d', arcoPath(anguloMin, anguloMax, RAIO_ARCO));
-    document.getElementById(prefixo + 'Glow').setAttribute('d', arcoPath(anguloMin, anguloMax, RAIO_ARCO));
-
-    var angAmarelaIni = anguloValor(amarelaIni, max);
-    var angVermelhaIni = anguloValor(vermelhaIni, max);
-
-    // Amarelo vai do seu inicio ate o inicio do vermelho (sem gap)
-    document.getElementById(prefixo + 'Amarela').setAttribute('d', fatiaPath(angAmarelaIni, angVermelhaIni, RAIO_ARCO));
-    document.getElementById(prefixo + 'Vermelha').setAttribute('d', fatiaPath(angVermelhaIni, anguloMax, RAIO_ARCO));
-
-    desenharMarcacoes(prefixo + 'Ticks', marcacoes, max);
   }
 
   function atualizarGauge(needleEl, valor, min, max) {
@@ -763,12 +799,6 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     // SVG e redimensionado responsivamente pelo CSS (width:100%).
     needleEl.setAttribute('transform', 'rotate(' + angulo + ' ' + GAUGE_CX + ' ' + GAUGE_CY + ')');
   }
-
-  // Monta os dois gauges: inicio da faixa amarela e inicio da
-  // vermelha (o amarelo sempre termina exatamente onde o vermelho
-  // comeca, sem gap sem cor entre as duas)
-  configurarGauge('temp', TEMP_MIN, TEMP_MAX, 95, 120, [-30, 0, 50, 100, 150, 180]);
-  configurarGauge('press', PRESS_MIN, PRESS_MAX, 1.0, 1.2, [-0.5, 0, 0.5, 1, 1.5, 2]);
 
   function atualizarSomTexto() {
     if (numAudios > 0) {
@@ -938,6 +968,8 @@ void setup() {
 
   // Inicia o servidor HTTP (pagina web do painel)
   httpServer.on("/", handleRoot);
+  httpServer.on("/gauge_temp_bg.svg", handleGaugeTempBg);
+  httpServer.on("/gauge_press_bg.svg", handleGaugePressBg);
   httpServer.begin();
   Serial.println("Servidor web iniciado. Acesse http://192.168.4.1/ pelo navegador.");
 }
