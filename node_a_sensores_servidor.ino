@@ -815,7 +815,18 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     top: 0; left: 0;
     width: 100%; height: 100%;
   }
-  .gauge-needle { stroke: #ff2020; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 5px #ff0000cc); transition: transform 0.25s ease-out; }
+  /* IMPORTANTE: NAO colocar "transition" sobre o transform aqui.
+     O ponteiro e movido via atributo SVG "transform" (rotate(ang cx cy)).
+     Se o CSS tiver "transition: transform", o navegador interpola isso
+     como uma matriz (matrix()), e nao como um angulo puro - em saltos
+     bruscos de valor essa decomposicao de matriz introduz um pequeno
+     deslocamento de translacao durante a transicao, fazendo o pivo
+     "fugir" do centro por uma fracao de segundo (o efeito de
+     "ponteiro balancando" relatado). A suavizacao do movimento e
+     feita manualmente em JS (funcao animarPonteiro), interpolando o
+     ANGULO em si e sempre reescrevendo rotate(ang cx cy) - assim o
+     pivo nunca sai do centro. */
+  .gauge-needle { stroke: #ff2020; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 5px #ff0000cc); }
   .gauge-pivot { fill: #1a1a1a; stroke: #ff2020; stroke-width: 1.5; }
 
   .painel-som {
@@ -960,6 +971,40 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   // TEMP_MIN/MAX ou PRESS_MIN/MAX abaixo para bater com o novo fundo.
   var GAUGE_CX = 110, GAUGE_CY = 110;
 
+  // Estado de animacao de cada ponteiro (angulo atual exibido na tela
+  // e o "id" do requestAnimationFrame em andamento, se houver). Isso
+  // substitui a transicao CSS por uma suavizacao feita em JS, que
+  // interpola o ANGULO (nao a matriz de transformacao) - assim o
+  // pivo do ponteiro nunca sai do centro, mesmo com saltos bruscos
+  // de valor.
+  var animTemp = { atual: null, alvo: 0, rafId: null };
+  var animPress = { atual: null, alvo: 0, rafId: null };
+
+  function animarPonteiro(needleEl, estado, anguloAlvo) {
+    estado.alvo = anguloAlvo;
+    if (estado.atual === null) {
+      // primeira leitura: posiciona direto, sem animar
+      estado.atual = anguloAlvo;
+      needleEl.setAttribute('transform', 'rotate(' + estado.atual + ' ' + GAUGE_CX + ' ' + GAUGE_CY + ')');
+      return;
+    }
+    if (estado.rafId !== null) return; // ja existe uma animacao rodando, ela vai buscar o novo alvo sozinha
+
+    function passo() {
+      var diff = estado.alvo - estado.atual;
+      if (Math.abs(diff) < 0.05) {
+        estado.atual = estado.alvo;
+        needleEl.setAttribute('transform', 'rotate(' + estado.atual + ' ' + GAUGE_CX + ' ' + GAUGE_CY + ')');
+        estado.rafId = null;
+        return;
+      }
+      estado.atual += diff * 0.18; // aproxima 18% da distancia restante a cada frame (suave e sem overshoot)
+      needleEl.setAttribute('transform', 'rotate(' + estado.atual + ' ' + GAUGE_CX + ' ' + GAUGE_CY + ')');
+      estado.rafId = requestAnimationFrame(passo);
+    }
+    estado.rafId = requestAnimationFrame(passo);
+  }
+
   function anguloValor(valor, max) {
     return -90 + (valor / max) * 180;
   }
@@ -969,13 +1014,15 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     return anguloValor(v, max);
   }
 
-  function atualizarGauge(needleEl, valor, min, max) {
+  function atualizarGauge(needleEl, valor, min, max, estadoAnim) {
     var angulo = anguloGauge(valor, min, max);
     // Usa o atributo "transform" nativo do SVG (rotate com centro
     // explicito em coordenadas do viewBox), em vez de CSS
     // transform-origin - isso evita bug de pivo desalinhado quando o
     // SVG e redimensionado responsivamente pelo CSS (width:100%).
-    needleEl.setAttribute('transform', 'rotate(' + angulo + ' ' + GAUGE_CX + ' ' + GAUGE_CY + ')');
+    // A suavizacao do movimento fica por conta de animarPonteiro()
+    // (interpola o angulo em JS), NAO de transition no CSS.
+    animarPonteiro(needleEl, estadoAnim, angulo);
   }
 
   function atualizarSomTexto() {
@@ -1047,11 +1094,11 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
         }
         if (typeof data.temp !== 'undefined') {
           elValTemp.textContent = data.temp.toFixed(0);
-          atualizarGauge(elNeedleTemp, data.temp, TEMP_MIN, TEMP_MAX);
+          atualizarGauge(elNeedleTemp, data.temp, TEMP_MIN, TEMP_MAX, animTemp);
         }
         if (typeof data.press !== 'undefined') {
           elValPress.textContent = data.press.toFixed(1);
-          atualizarGauge(elNeedlePress, data.press, PRESS_MIN, PRESS_MAX);
+          atualizarGauge(elNeedlePress, data.press, PRESS_MIN, PRESS_MAX, animPress);
         }
       } catch (e) { /* mensagem invalida, ignora */ }
     };
