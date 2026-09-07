@@ -796,13 +796,12 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     margin-top: 4px;
   }
   .gauge-valor {
-    font-size: 26px;
+    font-size: 22px;
     font-weight: 700;
     color: #fff4c2;
-    text-shadow: 0 0 10px #ffcc0099;
-    margin-top: 2px;
+    text-shadow: 0 0 4px #000, 0 0 10px #ffcc0099;
   }
-  .gauge-unidade { font-size: 13px; color: #7fb8cc; }
+  .gauge-unidade { font-size: 12px; color: #cfe9f2; }
 
   /* Camadas do gauge: a imagem de fundo (bezel, marcacoes, faixas,
      tudo isso vem do arquivo SVG externo - editavel sem mexer aqui)
@@ -814,6 +813,22 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
+  }
+  /* Valor numerico (temp/pressao) sobreposto DENTRO do mostrador,
+     logo abaixo do pivo do ponteiro. A faixa 60%-73% da altura do
+     gauge foi conferida renderizando o SVG de fundo: e um vao vazio
+     entre o emblema central e os textos decorativos da parte de
+     baixo (TEMPERATURA / TURBO BOOST), entao o numero fica visivel
+     sem cobrir nada do desenho estatico do fundo. O ponteiro tambem
+     nunca varre essa area (ele so se move na metade de cima do
+     mostrador, de -90 a +90 graus). */
+  .gauge-valor-overlay {
+    position: absolute;
+    left: 0; right: 0;
+    top: 64%;
+    transform: translateY(-50%);
+    text-align: center;
+    pointer-events: none;
   }
   /* IMPORTANTE: NAO colocar "transition" sobre o transform aqui.
      O ponteiro e movido via atributo SVG "transform" (rotate(ang cx cy)).
@@ -913,8 +928,8 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
           <line class="gauge-needle" id="needlePress" x1="110" y1="110" x2="110" y2="45"></line>
           <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
         </svg>
+        <div class="gauge-valor-overlay gauge-valor"><span id="valPress">--</span><span class="gauge-unidade"> bar</span></div>
       </div>
-      <div class="gauge-valor"><span id="valPress">--</span><span class="gauge-unidade"> bar</span></div>
     </div>
 
     <div class="gauge-box">
@@ -924,8 +939,8 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
           <line class="gauge-needle" id="needleTemp" x1="110" y1="110" x2="110" y2="45"></line>
           <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
         </svg>
+        <div class="gauge-valor-overlay gauge-valor"><span id="valTemp">--</span><span class="gauge-unidade"> &deg;C</span></div>
       </div>
-      <div class="gauge-valor"><span id="valTemp">--</span><span class="gauge-unidade"> &deg;C</span></div>
     </div>
   </div>
 
