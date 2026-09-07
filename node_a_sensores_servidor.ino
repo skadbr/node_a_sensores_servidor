@@ -826,8 +826,8 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
      feita manualmente em JS (funcao animarPonteiro), interpolando o
      ANGULO em si e sempre reescrevendo rotate(ang cx cy) - assim o
      pivo nunca sai do centro. */
-  .gauge-needle { stroke: #ff2020; stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 5px #ff0000cc); }
-  .gauge-pivot { fill: #1a1a1a; stroke: #ff2020; stroke-width: 1.5; }
+  .gauge-needle { stroke: #f4fbff; stroke-width: 3; stroke-linecap: round; paint-order: stroke; stroke-linejoin: round; filter: drop-shadow(0 0 2px #000a) drop-shadow(0 0 6px #00eaffcc); }
+  .gauge-pivot { fill: #1a1a1a; stroke: #f4fbff; stroke-width: 1.5; }
 
   .painel-som {
     margin-top: 22px;
@@ -908,17 +908,6 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
   <div class="gauges">
     <div class="gauge-box">
       <div class="gauge-camadas">
-        <img class="gauge-bg-img" src="/gauge_temp_bg.svg" alt="Mostrador temperatura">
-        <svg class="gauge-needle-svg" viewBox="0 0 220 220">
-          <line class="gauge-needle" id="needleTemp" x1="110" y1="110" x2="110" y2="45"></line>
-          <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
-        </svg>
-      </div>
-      <div class="gauge-valor"><span id="valTemp">--</span><span class="gauge-unidade"> &deg;C</span></div>
-    </div>
-
-    <div class="gauge-box">
-      <div class="gauge-camadas">
         <img class="gauge-bg-img" src="/gauge_press_bg.svg" alt="Mostrador pressao">
         <svg class="gauge-needle-svg" viewBox="0 0 220 220">
           <line class="gauge-needle" id="needlePress" x1="110" y1="110" x2="110" y2="45"></line>
@@ -926,6 +915,17 @@ const char PAGE_HTML[] PROGMEM = R"rawliteral(
         </svg>
       </div>
       <div class="gauge-valor"><span id="valPress">--</span><span class="gauge-unidade"> bar</span></div>
+    </div>
+
+    <div class="gauge-box">
+      <div class="gauge-camadas">
+        <img class="gauge-bg-img" src="/gauge_temp_bg.svg" alt="Mostrador temperatura">
+        <svg class="gauge-needle-svg" viewBox="0 0 220 220">
+          <line class="gauge-needle" id="needleTemp" x1="110" y1="110" x2="110" y2="45"></line>
+          <circle class="gauge-pivot" cx="110" cy="110" r="6"></circle>
+        </svg>
+      </div>
+      <div class="gauge-valor"><span id="valTemp">--</span><span class="gauge-unidade"> &deg;C</span></div>
     </div>
   </div>
 
