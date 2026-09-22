@@ -170,6 +170,18 @@ const float FATOR_FILTRO_TEMPERATURA = 0.15;
 // independente da altitude/pressao atmosferica do local.
 float offsetPressaoBar = 0.0;
 
+// ---------- Estado da leitura da pasta 01 do cartao SD ----------
+// Mantemos a API do Node A compatvel com o Node B, mas a leitura da
+// SD nao bloqueia mais o loop() do ESP8266. Isso reduz risco de "travamento"
+// do WebSocket durante a inicializacao do cartao microSD.
+bool leituraSdEmAndamento = false;
+uint8_t clienteSdAtual = 0;
+int tentativaSdAtual = 0;
+unsigned long proximaTentativaSd = 0;
+const int MAX_TENTATIVAS_LEITURA_SD = 15;
+const unsigned long ATRASO_TENTATIVA_SD_MS = 500;
+const unsigned long ATRASO_INICIAL_SD_MS = 200;
+
 // ---------- Constantes de conversao do sensor de pressao PS10 ----------
 // Tensao aproximada (em Volts) correspondente ao valor maximo do ADC
 // (1023) no pino A0 do Wemos D1 Mini. Pode variar por placa - calibrar
@@ -301,7 +313,7 @@ void enviarDadosSensores() {
   float temperatura = lerTemperatura();
   float pressao = lerPressaoCorrigida();
 
-  JsonDocument doc;
+  StaticJsonDocument<96> doc;
   doc["temp"]  = temperatura;
   doc["press"] = pressao;
 
@@ -315,7 +327,7 @@ void enviarDadosSensores() {
 // Informa a um cliente especifico quantos audios estao disponiveis.
 // Chamado sempre que um novo cliente (Node B) se conecta.
 void enviarQuantidadeAudios(uint8_t num) {
-  JsonDocument doc;
+  StaticJsonDocument<96> doc;
   doc["num_audios"] = numAudios;
 
   String saida;
@@ -325,53 +337,69 @@ void enviarQuantidadeAudios(uint8_t num) {
   Serial.println("[WS] Enviado num_audios: " + saida);
 }
 
-// Le a quantidade de audios na pasta "01" do cartao SD, com
-// retentativas (o cartao pode nao estar pronto logo apos ligar).
-// So executa a busca completa se ainda nao tiver uma contagem
-// valida - reconexoes seguintes reaproveitam o valor em cache.
+// Faz a leitura da quantidade de audios sem bloquear o loop().
+// Mantem a mesma API que o Node B espera, mas evita delay() na rotina.
 void lerQuantidadeAudios(uint8_t num) {
+  if (numAudios > 0) {
+    Serial.println("Quantidade de audios ja conhecida, pulando releitura.");
+    return;
+  }
 
-    if (numAudios > 0) {
-      Serial.println("Quantidade de audios ja conhecida, pulando releitura.");
-      return;
-    }
+  if (leituraSdEmAndamento) {
+    Serial.println("Leitura de audios ja em andamento, ignorando nova solicitacao.");
+    return;
+  }
 
-    delay(200); // pequena pausa antes de consultar o cartao
+  leituraSdEmAndamento = true;
+  clienteSdAtual = num;
+  tentativaSdAtual = 0;
+  proximaTentativaSd = millis() + ATRASO_INICIAL_SD_MS;
 
-    // Tenta ler a quantidade de audios varias vezes. Logo apos ligar
-    // a alimentacao (boot "frio"), o cartao SD as vezes ainda nao esta
-    // totalmente pronto na primeira consulta e a leitura falha
-    // (retorna -1) - mas funciona normalmente alguns instantes depois.
-    // No reset (boot "quente"), a alimentacao ja estava estavel ha
-    // mais tempo, entao costuma funcionar de primeira.
-    const int MAX_TENTATIVAS_LEITURA_SD = 15;
-    for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_LEITURA_SD; tentativa++) {
-      numAudios = dfPlayer.readFileCountsInFolder(1); // conta arquivos na pasta "01"
-      if (numAudios > 0) {
-        Serial.printf("Audios encontrados na pasta 01: %d (tentativa %d)\n", numAudios, tentativa);
-        break;
-      }
-      Serial.printf("Tentativa %d: leitura da pasta 01 falhou (retornou %d). Tentando novamente...\n", tentativa, numAudios);
+  Serial.println("Inicio da leitura da quantidade de audios na pasta 01 (assincrona).");
+}
 
-      JsonDocument doc;
-      doc["tentativa"] = tentativa;
-      String saida;
-      serializeJson(doc, saida);
-      webSocket.sendTXT(num, saida);
+void processarLeituraAudios() {
+  if (!leituraSdEmAndamento) {
+    return;
+  }
 
-      delay(500);
-    }
+  if (millis() < proximaTentativaSd) {
+    return;
+  }
 
-    if (numAudios <= 0) {
-      Serial.println("ERRO: nao foi possivel ler a quantidade de audios na pasta 01 apos varias tentativas!");
-      numAudios = 0; // evita enviar valor negativo ao Node B
+  tentativaSdAtual++;
+  numAudios = dfPlayer.readFileCountsInFolder(1);
 
-      JsonDocument doc;
-      doc["erro"] = "Falha ao ler audios na SD";
-      String saida;
-      serializeJson(doc, saida);
-      webSocket.sendTXT(num, saida);
-    }
+  if (numAudios > 0) {
+    Serial.printf("Audios encontrados na pasta 01: %d (tentativa %d)\n", numAudios, tentativaSdAtual);
+    leituraSdEmAndamento = false;
+    return;
+  }
+
+  Serial.printf("Tentativa %d: leitura da pasta 01 falhou (retornou %d). Tentando novamente...\n",
+                tentativaSdAtual, numAudios);
+
+  StaticJsonDocument<96> doc;
+  doc["tentativa"] = tentativaSdAtual;
+  String saida;
+  serializeJson(doc, saida);
+  webSocket.sendTXT(clienteSdAtual, saida);
+
+  if (tentativaSdAtual >= MAX_TENTATIVAS_LEITURA_SD) {
+    Serial.println("ERRO: nao foi possivel ler a quantidade de audios na pasta 01 apos varias tentativas!");
+    numAudios = 0;
+
+    StaticJsonDocument<96> docErro;
+    docErro["erro"] = "Falha ao ler audios na SD";
+    String erro;
+    serializeJson(docErro, erro);
+    webSocket.sendTXT(clienteSdAtual, erro);
+
+    leituraSdEmAndamento = false;
+    return;
+  }
+
+  proximaTentativaSd = millis() + ATRASO_TENTATIVA_SD_MS;
 }
 
 // ==========================================================
@@ -397,7 +425,7 @@ void lerQuantidadeAudios(uint8_t num) {
 // constantes TEMP_MIN/TEMP_MAX e PRESS_MIN/PRESS_MAX definidas no
 // JavaScript (dentro de PAGE_HTML).
 
-
+//ajustei o svg
 const char GAUGE_TEMP_BG_SVG[] PROGMEM = R"rawliteral(<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="56.0916mm" height="56.0916mm" version="1.1" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
 viewBox="0 0 571.11 571.11"
  xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -992,7 +1020,7 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t leng
       String msg = String((char*)payload);
       Serial.printf("[WS] Mensagem recebida: %s\n", msg.c_str());
 
-      JsonDocument doc;
+      StaticJsonDocument<128> doc;
       DeserializationError err = deserializeJson(doc, msg);
       if (!err) {
         const char* evento = doc["event"];
@@ -1064,6 +1092,7 @@ void setup() {
 void loop() {
   webSocket.loop();
   httpServer.handleClient();
+  processarLeituraAudios();
 
   if (millis() - ultimoEnvio >= INTERVALO_ENVIO) {
     ultimoEnvio = millis();
