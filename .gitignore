@@ -1,0 +1,22 @@
+# Artefatos do Arduino/ESP32
+build/
+*.bin
+*.elf
+*.map
+*.bkp
+
+# Logs e saídas
+arduino.log
+out/
+
+# Dependências e ferramentas
+node_modules/
+.vscode-test/
+.idea/
+*.vsix
+assets/platform/*/arduino-cli
+
+# Arquivos gerados de configuração C/C++
+test/**/c_cpp_properties.json
+src/views/app/sprites-generated/
+.vscode/

@@ -373,6 +373,7 @@ void processarLeituraAudios() {
   if (numAudios > 0) {
     Serial.printf("Audios encontrados na pasta 01: %d (tentativa %d)\n", numAudios, tentativaSdAtual);
     leituraSdEmAndamento = false;
+    enviarQuantidadeAudios(clienteSdAtual);
     return;
   }
 
