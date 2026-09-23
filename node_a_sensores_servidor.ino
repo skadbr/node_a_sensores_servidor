@@ -8,7 +8,8 @@
    - Cria uma rede WiFi propria (modo Access Point)
    - Le sensor de temperatura (termopar tipo K via modulo MAX6675) e
      sensor de pressao (PS10, saida analogica 1-5V, 0-10bar), enviando
-     os dados via WebSocket a cada 500ms
+    le os sensores a cada 500ms e transmite por mudanca relevante
+    ou heartbeat periodico
    - Recebe evento (som1, som2, som3, ...) de QUALQUER cliente
      conectado e toca o audio correspondente no modulo DFPlayer Mini
      + mini alto-falante
@@ -199,14 +200,18 @@ const float TENSAO_SENSOR_MAX = 5.0;
 const float PRESSAO_MIN_BAR   = 0.0;
 const float PRESSAO_MAX_BAR   = 10.0;
 
-// ---------- Controle de envio periodico dos sensores ----------
-unsigned long ultimoEnvio = 0;
-// 500ms ainda parece quase instantaneo no mostrador (principalmente
-// com o filtro de temperatura ja suavizando as leituras), mas gera
-// bem menos trafego/carga no Node A que 300ms - isso da mais folga
-// para o Node A processar os eventos de audio (som1/som2/...)
-// prontamente, sem competir tanto com o envio continuo dos sensores.
+// ---------- Controle de leitura e envio dos sensores ----------
+unsigned long ultimaLeituraSensores = 0;
+unsigned long ultimoEnvioSensores = 0;
+float ultimaTemperaturaLida = NAN;
+float ultimaPressaoLida = NAN;
+bool leituraSensoresDisponivel = false;
+float ultimaTemperaturaEnviada = NAN;
+float ultimaPressaoEnviada = NAN;
 const unsigned long INTERVALO_ENVIO = 500;
+const unsigned long INTERVALO_HEARTBEAT = 2000;
+const float VARIACAO_TEMP_ENVIO = 1.0;
+const float VARIACAO_PRESSAO_ENVIO = 0.1;
 
 // ==========================================================
 // Toca o arquivo NNN.mp3 dentro da pasta "01" do cartao SD.
@@ -312,16 +317,51 @@ void calibrarZeroPressao() {
 void enviarDadosSensores() {
   float temperatura = lerTemperatura();
   float pressao = lerPressaoCorrigida();
+  ultimaTemperaturaLida = temperatura;
+  ultimaPressaoLida = pressao;
+  leituraSensoresDisponivel = true;
 
-  StaticJsonDocument<96> doc;
+  float temperaturaExibida = round(temperatura);
+  float pressaoExibida = round(pressao * 10) / 10.0;
+  bool primeiraLeitura = isnan(ultimaTemperaturaEnviada) || isnan(ultimaPressaoEnviada);
+  bool houveMudanca = primeiraLeitura ||
+                      fabs(temperaturaExibida - ultimaTemperaturaEnviada) >= VARIACAO_TEMP_ENVIO ||
+                      fabs(pressaoExibida - ultimaPressaoEnviada) >= VARIACAO_PRESSAO_ENVIO;
+  bool heartbeatDevido = millis() - ultimoEnvioSensores >= INTERVALO_HEARTBEAT;
+
+  if (!houveMudanca && !heartbeatDevido) {
+    return;
+  }
+
+  StaticJsonDocument<128> doc;
   doc["temp"]  = temperatura;
   doc["press"] = pressao;
+  doc["heartbeat"] = !houveMudanca;
 
   String saida;
   serializeJson(doc, saida);
 
   webSocket.broadcastTXT(saida);
   Serial.println("[WS] Enviado: " + saida);
+  ultimaTemperaturaEnviada = temperaturaExibida;
+  ultimaPressaoEnviada = pressaoExibida;
+  ultimoEnvioSensores = millis();
+}
+
+void enviarUltimaLeituraSensores(uint8_t num) {
+  if (!leituraSensoresDisponivel) {
+    return;
+  }
+
+  StaticJsonDocument<128> doc;
+  doc["temp"] = ultimaTemperaturaLida;
+  doc["press"] = ultimaPressaoLida;
+  doc["heartbeat"] = true;
+
+  String saida;
+  serializeJson(doc, saida);
+  webSocket.sendTXT(num, saida);
+  Serial.println("[WS] Enviado ultima leitura ao novo cliente: " + saida);
 }
 
 // Informa a um cliente especifico quantos audios estao disponiveis.
@@ -1011,6 +1051,7 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t leng
       Serial.printf("[WS] Cliente %u conectado\n", num);
       lerQuantidadeAudios(num);
       enviarQuantidadeAudios(num);
+      enviarUltimaLeituraSensores(num);
       break;
 
     case WStype_DISCONNECTED:
@@ -1095,8 +1136,8 @@ void loop() {
   httpServer.handleClient();
   processarLeituraAudios();
 
-  if (millis() - ultimoEnvio >= INTERVALO_ENVIO) {
-    ultimoEnvio = millis();
+  if (millis() - ultimaLeituraSensores >= INTERVALO_ENVIO) {
+    ultimaLeituraSensores = millis();
     enviarDadosSensores();
   }
 }
